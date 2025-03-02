@@ -4,13 +4,17 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+
 import stirling.software.SPDF.model.api.PDFFile;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class RedactPdfRequest extends PDFFile {
 
-    @Schema(description = "List of text to redact from the PDF", type = "string", required = true)
+    @Schema(
+            description = "List of text to redact from the PDF",
+            type = "string",
+            requiredMode = Schema.RequiredMode.REQUIRED)
     private String listOfText;
 
     @Schema(description = "Whether to use regex for the listOfText", defaultValue = "false")
