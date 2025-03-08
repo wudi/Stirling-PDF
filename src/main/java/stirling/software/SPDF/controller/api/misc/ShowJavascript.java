@@ -6,8 +6,8 @@ import java.util.Map;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.common.PDNameTreeNode;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionJavaScript;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,10 +15,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import stirling.software.SPDF.model.api.PDFFile;
+import stirling.software.SPDF.service.CustomPDDocumentFactory;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
 @RestController
@@ -26,7 +28,12 @@ import stirling.software.SPDF.utils.WebResponseUtils;
 @Tag(name = "Misc", description = "Miscellaneous APIs")
 public class ShowJavascript {
 
-    private static final Logger logger = LoggerFactory.getLogger(ShowJavascript.class);
+    private final CustomPDDocumentFactory pdfDocumentFactory;
+
+    @Autowired
+    public ShowJavascript(CustomPDDocumentFactory pdfDocumentFactory) {
+        this.pdfDocumentFactory = pdfDocumentFactory;
+    }
 
     @PostMapping(consumes = "multipart/form-data", value = "/show-javascript")
     @Operation(
@@ -36,7 +43,7 @@ public class ShowJavascript {
         MultipartFile inputFile = request.getFileInput();
         String script = "";
 
-        try (PDDocument document = PDDocument.load(inputFile.getInputStream())) {
+        try (PDDocument document = pdfDocumentFactory.load(inputFile.getBytes())) {
 
             if (document.getDocumentCatalog() != null
                     && document.getDocumentCatalog().getNames() != null) {
@@ -53,7 +60,8 @@ public class ShowJavascript {
 
                         script +=
                                 "// File: "
-                                        + inputFile.getOriginalFilename()
+                                        + Filenames.toSimpleFileName(
+                                                inputFile.getOriginalFilename())
                                         + ", Script: "
                                         + name
                                         + "\n"
@@ -65,12 +73,15 @@ public class ShowJavascript {
 
             if (script.isEmpty()) {
                 script =
-                        "PDF '" + inputFile.getOriginalFilename() + "' does not contain Javascript";
+                        "PDF '"
+                                + Filenames.toSimpleFileName(inputFile.getOriginalFilename())
+                                + "' does not contain Javascript";
             }
 
             return WebResponseUtils.bytesToWebResponse(
                     script.getBytes(StandardCharsets.UTF_8),
-                    inputFile.getOriginalFilename() + ".js");
+                    Filenames.toSimpleFileName(inputFile.getOriginalFilename()) + ".js",
+                    MediaType.TEXT_PLAIN);
         }
     }
 }

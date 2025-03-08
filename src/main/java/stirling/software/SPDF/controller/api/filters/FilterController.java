@@ -5,6 +5,7 @@ import java.io.IOException;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
@@ -21,6 +23,7 @@ import stirling.software.SPDF.model.api.filter.ContainsTextRequest;
 import stirling.software.SPDF.model.api.filter.FileSizeRequest;
 import stirling.software.SPDF.model.api.filter.PageRotationRequest;
 import stirling.software.SPDF.model.api.filter.PageSizeRequest;
+import stirling.software.SPDF.service.CustomPDDocumentFactory;
 import stirling.software.SPDF.utils.PdfUtils;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
@@ -28,6 +31,13 @@ import stirling.software.SPDF.utils.WebResponseUtils;
 @RequestMapping("/api/v1/filter")
 @Tag(name = "Filter", description = "Filter APIs")
 public class FilterController {
+
+    private final CustomPDDocumentFactory pdfDocumentFactory;
+
+    @Autowired
+    public FilterController(CustomPDDocumentFactory pdfDocumentFactory) {
+        this.pdfDocumentFactory = pdfDocumentFactory;
+    }
 
     @PostMapping(consumes = "multipart/form-data", value = "/filter-contains-text")
     @Operation(
@@ -39,10 +49,10 @@ public class FilterController {
         String text = request.getText();
         String pageNumber = request.getPageNumbers();
 
-        PDDocument pdfDocument = PDDocument.load(inputFile.getInputStream());
+        PDDocument pdfDocument = pdfDocumentFactory.load(inputFile.getBytes());
         if (PdfUtils.hasText(pdfDocument, pageNumber, text))
             return WebResponseUtils.pdfDocToWebResponse(
-                    pdfDocument, inputFile.getOriginalFilename());
+                    pdfDocument, Filenames.toSimpleFileName(inputFile.getOriginalFilename()));
         return null;
     }
 
@@ -56,10 +66,10 @@ public class FilterController {
         MultipartFile inputFile = request.getFileInput();
         String pageNumber = request.getPageNumbers();
 
-        PDDocument pdfDocument = PDDocument.load(inputFile.getInputStream());
+        PDDocument pdfDocument = pdfDocumentFactory.load(inputFile.getBytes());
         if (PdfUtils.hasImages(pdfDocument, pageNumber))
             return WebResponseUtils.pdfDocToWebResponse(
-                    pdfDocument, inputFile.getOriginalFilename());
+                    pdfDocument, Filenames.toSimpleFileName(inputFile.getOriginalFilename()));
         return null;
     }
 
@@ -73,7 +83,7 @@ public class FilterController {
         String pageCount = request.getPageCount();
         String comparator = request.getComparator();
         // Load the PDF
-        PDDocument document = PDDocument.load(inputFile.getInputStream());
+        PDDocument document = pdfDocumentFactory.load(inputFile.getBytes());
         int actualPageCount = document.getNumberOfPages();
 
         boolean valid = false;
@@ -107,7 +117,7 @@ public class FilterController {
         String comparator = request.getComparator();
 
         // Load the PDF
-        PDDocument document = PDDocument.load(inputFile.getInputStream());
+        PDDocument document = pdfDocumentFactory.load(inputFile.getBytes());
 
         PDPage firstPage = document.getPage(0);
         PDRectangle actualPageSize = firstPage.getMediaBox();
@@ -183,7 +193,7 @@ public class FilterController {
         String comparator = request.getComparator();
 
         // Load the PDF
-        PDDocument document = PDDocument.load(inputFile.getInputStream());
+        PDDocument document = pdfDocumentFactory.load(inputFile.getBytes());
 
         // Get the rotation of the first page
         PDPage firstPage = document.getPage(0);

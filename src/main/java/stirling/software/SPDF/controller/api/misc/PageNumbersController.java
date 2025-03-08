@@ -9,8 +9,8 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -19,10 +19,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import stirling.software.SPDF.model.api.misc.AddPageNumbersRequest;
+import stirling.software.SPDF.service.CustomPDDocumentFactory;
 import stirling.software.SPDF.utils.GeneralUtils;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
@@ -31,7 +33,12 @@ import stirling.software.SPDF.utils.WebResponseUtils;
 @Tag(name = "Misc", description = "Miscellaneous APIs")
 public class PageNumbersController {
 
-    private static final Logger logger = LoggerFactory.getLogger(PageNumbersController.class);
+    private final CustomPDDocumentFactory pdfDocumentFactory;
+
+    @Autowired
+    public PageNumbersController(CustomPDDocumentFactory pdfDocumentFactory) {
+        this.pdfDocumentFactory = pdfDocumentFactory;
+    }
 
     @PostMapping(value = "/add-page-numbers", consumes = "multipart/form-data")
     @Operation(
@@ -40,6 +47,7 @@ public class PageNumbersController {
                     "This operation takes an input PDF file and adds page numbers to it. Input:PDF Output:PDF Type:SISO")
     public ResponseEntity<byte[]> addPageNumbers(@ModelAttribute AddPageNumbersRequest request)
             throws IOException {
+
         MultipartFile file = request.getFileInput();
         String customMargin = request.getCustomMargin();
         int position = request.getPosition();
@@ -48,8 +56,9 @@ public class PageNumbersController {
         String customText = request.getCustomText();
         int pageNumber = startingNumber;
         byte[] fileBytes = file.getBytes();
-        PDDocument document = PDDocument.load(fileBytes);
-
+        PDDocument document = pdfDocumentFactory.load(fileBytes);
+        float font_size = request.getFontSize();
+        String font_type = request.getFontType();
         float marginFactor;
         switch (customMargin.toLowerCase()) {
             case "small":
@@ -64,18 +73,16 @@ public class PageNumbersController {
             case "x-large":
                 marginFactor = 0.075f;
                 break;
-
             default:
                 marginFactor = 0.035f;
                 break;
         }
 
-        float fontSize = 12.0f;
-        PDType1Font font = PDType1Font.HELVETICA;
-        if (pagesToNumber == null || pagesToNumber.length() == 0) {
+        float fontSize = font_size;
+        if (pagesToNumber == null || pagesToNumber.isEmpty()) {
             pagesToNumber = "all";
         }
-        if (customText == null || customText.length() == 0) {
+        if (customText == null || customText.isEmpty()) {
             customText = "{n}";
         }
         List<Integer> pagesToNumberList =
@@ -86,50 +93,69 @@ public class PageNumbersController {
             PDRectangle pageSize = page.getMediaBox();
 
             String text =
-                    customText != null
-                            ? customText
-                                    .replace("{n}", String.valueOf(pageNumber))
-                                    .replace("{total}", String.valueOf(document.getNumberOfPages()))
-                                    .replace(
-                                            "{filename}",
-                                            file.getOriginalFilename()
-                                                    .replaceFirst("[.][^.]+$", ""))
-                            : String.valueOf(pageNumber);
+                    customText
+                            .replace("{n}", String.valueOf(pageNumber))
+                            .replace("{total}", String.valueOf(document.getNumberOfPages()))
+                            .replace(
+                                    "{filename}",
+                                    Filenames.toSimpleFileName(file.getOriginalFilename())
+                                            .replaceFirst("[.][^.]+$", ""));
+
+            PDType1Font currentFont =
+                    switch (font_type.toLowerCase()) {
+                        case "courier" -> new PDType1Font(Standard14Fonts.FontName.COURIER);
+                        case "times" -> new PDType1Font(Standard14Fonts.FontName.TIMES_ROMAN);
+                        default -> new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+                    };
 
             float x, y;
 
-            int xGroup = (position - 1) % 3;
-            int yGroup = 2 - (position - 1) / 3;
+            if (position == 5) {
+                // Calculate text width and font metrics
+                float textWidth = currentFont.getStringWidth(text) / 1000 * fontSize;
 
-            switch (xGroup) {
-                case 0: // left
-                    x = pageSize.getLowerLeftX() + marginFactor * pageSize.getWidth();
-                    break;
-                case 1: // center
-                    x = pageSize.getLowerLeftX() + (pageSize.getWidth() / 2);
-                    break;
-                default: // right
-                    x = pageSize.getUpperRightX() - marginFactor * pageSize.getWidth();
-                    break;
-            }
+                float ascent = currentFont.getFontDescriptor().getAscent() / 1000 * fontSize;
+                float descent = currentFont.getFontDescriptor().getDescent() / 1000 * fontSize;
 
-            switch (yGroup) {
-                case 0: // bottom
-                    y = pageSize.getLowerLeftY() + marginFactor * pageSize.getHeight();
-                    break;
-                case 1: // middle
-                    y = pageSize.getLowerLeftY() + (pageSize.getHeight() / 2);
-                    break;
-                default: // top
-                    y = pageSize.getUpperRightY() - marginFactor * pageSize.getHeight();
-                    break;
+                float centerX = pageSize.getLowerLeftX() + (pageSize.getWidth() / 2);
+                float centerY = pageSize.getLowerLeftY() + (pageSize.getHeight() / 2);
+
+                x = centerX - (textWidth / 2);
+                y = centerY - (ascent + descent) / 2;
+            } else {
+                int xGroup = (position - 1) % 3;
+                int yGroup = 2 - (position - 1) / 3;
+
+                x =
+                        switch (xGroup) {
+                            case 0 ->
+                                    pageSize.getLowerLeftX()
+                                            + marginFactor * pageSize.getWidth(); // left
+                            case 1 ->
+                                    pageSize.getLowerLeftX() + (pageSize.getWidth() / 2); // center
+                            default ->
+                                    pageSize.getUpperRightX()
+                                            - marginFactor * pageSize.getWidth(); // right
+                        };
+
+                y =
+                        switch (yGroup) {
+                            case 0 ->
+                                    pageSize.getLowerLeftY()
+                                            + marginFactor * pageSize.getHeight(); // bottom
+                            case 1 ->
+                                    pageSize.getLowerLeftY() + (pageSize.getHeight() / 2); // middle
+                            default ->
+                                    pageSize.getUpperRightY()
+                                            - marginFactor * pageSize.getHeight(); // top
+                        };
             }
 
             PDPageContentStream contentStream =
                     new PDPageContentStream(
-                            document, page, PDPageContentStream.AppendMode.APPEND, true);
+                            document, page, PDPageContentStream.AppendMode.APPEND, true, true);
             contentStream.beginText();
-            contentStream.setFont(font, fontSize);
+            contentStream.setFont(currentFont, fontSize);
             contentStream.newLineAtOffset(x, y);
             contentStream.showText(text);
             contentStream.endText();
@@ -144,7 +170,8 @@ public class PageNumbersController {
 
         return WebResponseUtils.bytesToWebResponse(
                 baos.toByteArray(),
-                file.getOriginalFilename().replaceFirst("[.][^.]+$", "") + "_numbersAdded.pdf",
+                Filenames.toSimpleFileName(file.getOriginalFilename()).replaceFirst("[.][^.]+$", "")
+                        + "_numbersAdded.pdf",
                 MediaType.APPLICATION_PDF);
     }
 }

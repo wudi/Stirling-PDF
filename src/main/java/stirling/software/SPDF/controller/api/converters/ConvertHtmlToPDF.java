@@ -1,5 +1,6 @@
 package stirling.software.SPDF.controller.api.converters;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -7,10 +8,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
-import stirling.software.SPDF.model.api.GeneralFile;
+import stirling.software.SPDF.config.RuntimePathConfig;
+import stirling.software.SPDF.model.ApplicationProperties;
+import stirling.software.SPDF.model.api.converters.HTMLToPdfRequest;
+import stirling.software.SPDF.service.CustomPDDocumentFactory;
 import stirling.software.SPDF.utils.FileToPdf;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
@@ -19,12 +24,30 @@ import stirling.software.SPDF.utils.WebResponseUtils;
 @RequestMapping("/api/v1/convert")
 public class ConvertHtmlToPDF {
 
+    private final CustomPDDocumentFactory pdfDocumentFactory;
+
+    private final ApplicationProperties applicationProperties;
+
+    private final RuntimePathConfig runtimePathConfig;
+
+    @Autowired
+    public ConvertHtmlToPDF(
+            CustomPDDocumentFactory pdfDocumentFactory,
+            ApplicationProperties applicationProperties,
+            RuntimePathConfig runtimePathConfig) {
+        this.pdfDocumentFactory = pdfDocumentFactory;
+
+        this.applicationProperties = applicationProperties;
+        this.runtimePathConfig = runtimePathConfig;
+    }
+
     @PostMapping(consumes = "multipart/form-data", value = "/html/pdf")
     @Operation(
             summary = "Convert an HTML or ZIP (containing HTML and CSS) to PDF",
             description =
-                    "This endpoint takes an HTML or ZIP file input and converts it to a PDF format.")
-    public ResponseEntity<byte[]> HtmlToPdf(@ModelAttribute GeneralFile request) throws Exception {
+                    "This endpoint takes an HTML or ZIP file input and converts it to a PDF format. Input:HTML Output:PDF Type:SISO")
+    public ResponseEntity<byte[]> HtmlToPdf(@ModelAttribute HTMLToPdfRequest request)
+            throws Exception {
         MultipartFile fileInput = request.getFileInput();
 
         if (fileInput == null) {
@@ -32,12 +55,24 @@ public class ConvertHtmlToPDF {
                     "Please provide an HTML or ZIP file for conversion.");
         }
 
-        String originalFilename = fileInput.getOriginalFilename();
+        String originalFilename = Filenames.toSimpleFileName(fileInput.getOriginalFilename());
         if (originalFilename == null
                 || (!originalFilename.endsWith(".html") && !originalFilename.endsWith(".zip"))) {
             throw new IllegalArgumentException("File must be either .html or .zip format.");
         }
-        byte[] pdfBytes = FileToPdf.convertHtmlToPdf(fileInput.getBytes(), originalFilename);
+
+        boolean disableSanitize =
+                Boolean.TRUE.equals(applicationProperties.getSystem().getDisableSanitize());
+
+        byte[] pdfBytes =
+                FileToPdf.convertHtmlToPdf(
+                        runtimePathConfig.getWeasyPrintPath(),
+                        request,
+                        fileInput.getBytes(),
+                        originalFilename,
+                        disableSanitize);
+
+        pdfBytes = pdfDocumentFactory.createNewBytesBasedOnOldDocument(pdfBytes);
 
         String outputFilename =
                 originalFilename.replaceFirst("[.][^.]+$", "")
